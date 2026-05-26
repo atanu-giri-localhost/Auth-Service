@@ -14,7 +14,7 @@ const Dashboard = () => {
     const fetchData = async () => {
       try {
         const res = await axios.get(
-          "http://localhost:5000/api/protected/dashboard",
+          `${import.meta.env.VITE_API_URL}/api/protected/dashboard`,
           { withCredentials: true }
         );
 
@@ -31,7 +31,7 @@ const Dashboard = () => {
 
   const handleLogout = () => {
     axios.post(
-      "http://localhost:5000/auth/logout",
+      `${import.meta.env.VITE_API_URL}/auth/logout`,
       {},
       { withCredentials: true }
     )
