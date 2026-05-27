@@ -23,11 +23,11 @@ router.get(
 
     // 👇 Redirect to frontend with token
     res.cookie("token", token, {
-      httpOnly: true,
-      secure: false, // Set to true in production with HTTPS
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
     res.redirect(`${process.env.CLIENT_URL}/dashboard`);
 
     } catch (err) {
@@ -37,10 +37,10 @@ router.get(
 
 router.post("/logout", (req, res) => {
   res.clearCookie("token", {
-    httpOnly: true,
-    secure: false, // Set to true in production with HTTPS
-    sameSite: "lax",
-  });
+  httpOnly: true,
+  secure: true,
+  sameSite: "none",
+});
   res.json({ message: "Logged out" });
 });
 

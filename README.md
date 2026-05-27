@@ -1,277 +1,195 @@
-# 🔐 Auth-Service
+# Auth-Service
 
-A full-stack **Google OAuth 2.0 authentication service** built with React and Express. Users sign in with their Google account, receive a JWT, and access protected API routes — all without server-side sessions.
+Auth-Service is a full-stack Google OAuth authentication project built with a
+React/Vite frontend and an Express backend. The backend signs a JWT after a
+successful Google login, stores that JWT in an HTTP-only cookie, and protects API
+routes by verifying that cookie on every request.
 
----
+This README describes how the project currently works in this repository.
 
-## 📋 Table of Contents
+## Tech Stack
 
-- [Tech Stack](#-tech-stack)
-- [Architecture](#-architecture)
-- [Authentication Flow](#-authentication-flow)
-- [Project Structure](#-project-structure)
-- [File-by-File Breakdown](#-file-by-file-breakdown)
-  - [Backend](#backend)
-  - [Frontend](#frontend)
-- [API Reference](#-api-reference)
-- [Getting Started](#-getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Environment Variables](#environment-variables)
-  - [Running the App](#running-the-app)
-- [Key Design Decisions](#-key-design-decisions)
+| Layer | Technology |
+| --- | --- |
+| Frontend | React 19, Vite, React Router, Axios |
+| Backend | Node.js, Express 5, Passport.js, JWT, cookie-parser |
+| Database | MongoDB with Mongoose |
+| Authentication | Google OAuth 2.0 via `passport-google-oauth20` |
 
----
+Default local ports:
 
-## 🛠 Tech Stack
+| App | URL |
+| --- | --- |
+| Frontend | `http://localhost:3000` |
+| Backend | `http://localhost:5000` |
 
-| Layer        | Technology                              | Port   |
-| ------------ | --------------------------------------- | ------ |
-| **Frontend** | React 19, Vite, React Router v7, Axios  | `3000` |
-| **Backend**  | Express 5, Passport.js, JWT, Mongoose   | `5000` |
-| **Database** | MongoDB Atlas                           | Cloud  |
-| **Auth**     | Google OAuth 2.0 via `passport-google-oauth20` | —      |
+## How The App Works
 
----
-
-## 🏗 Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FRONTEND (:3000)                         │
-│                                                                 │
-│   /  (Login)  ──►  /success  ──►  /dashboard                   │
-│   Click Google      Save JWT       Fetch protected data         │
-│   Login button      to localStorage  with Bearer token          │
-└───────┬─────────────────────┬───────────────────┬───────────────┘
-        │ redirect            │ redirect          │ GET
-        ▼                     │                   ▼
-┌─────────────────────────────┴───────────────────────────────────┐
-│                        BACKEND (:5000)                          │
-│                                                                 │
-│   /auth/google           /auth/google/callback                  │
-│   (Passport initiates    (Find/create user, sign JWT,           │
-│    Google OAuth)          redirect to frontend /success)        │
-│                                                                 │
-│   /api/protected/dashboard                                      │
-│   (JWT verified by authMiddleware → return user data)           │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │ find / create
-                                ▼
-                    ┌───────────────────────┐
-                    │   MongoDB Atlas       │
-                    │   (Users Collection)  │
-                    └───────────────────────┘
+```text
+Browser
+  |
+  | 1. Open frontend login page
+  v
+React app at CLIENT_URL
+  |
+  | 2. Click "Continue with Google"
+  |    Redirects to VITE_API_URL/auth/google
+  v
+Express backend
+  |
+  | 3. Passport sends the user to Google OAuth
+  v
+Google OAuth consent screen
+  |
+  | 4. Google redirects back to GOOGLE_CALLBACK_URL
+  v
+Express backend callback
+  |
+  | 5. Find or create MongoDB user
+  | 6. Sign JWT containing { id: user._id }
+  | 7. Set HTTP-only cookie named "token"
+  | 8. Redirect to CLIENT_URL/dashboard
+  v
+React dashboard
+  |
+  | 9. Calls protected API with axios { withCredentials: true }
+  v
+Express protected route
+  |
+  | 10. Reads req.cookies.token, verifies JWT, returns dashboard data
+  v
+Dashboard response
 ```
 
----
+Important: the current app does not use a `/success` route, `localStorage`, or an
+`Authorization: Bearer <token>` header. Authentication is cookie-based.
 
-## 🔄 Authentication Flow
+## Authentication Flow
 
-Below is the complete step-by-step flow from login to accessing protected data:
+1. The user opens the frontend at `/`.
+2. `frontend/src/pages/Login.jsx` redirects the browser to:
 
-### Step 1 — User Clicks "Login with Google"
+   ```text
+   ${VITE_API_URL}/auth/google
+   ```
 
-The `Login` page renders a button. On click, the browser does a **full-page redirect** to the backend:
+3. `backend/routes/auth.js` starts the Google OAuth flow with Passport.
+4. Google sends the user back to the callback URL configured in
+   `GOOGLE_CALLBACK_URL`.
+5. `backend/config/passport.js` receives the Google profile, searches MongoDB by
+   `googleId`, and creates a new `User` document if the account does not exist.
+6. The callback route signs a JWT with:
 
+   ```js
+   jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: "7d" })
+   ```
+
+7. The backend stores the token in an HTTP-only cookie named `token` and redirects
+   the user to:
+
+   ```text
+   ${CLIENT_URL}/dashboard
+   ```
+
+8. `frontend/src/pages/Dashboard.jsx` requests protected data with:
+
+   ```js
+   axios.get(`${import.meta.env.VITE_API_URL}/api/protected/dashboard`, {
+     withCredentials: true,
+   })
+   ```
+
+9. `backend/middlewares/authMiddleware.js` reads `req.cookies.token`, verifies it
+   using `JWT_SECRET`, attaches the decoded payload to `req.user`, and allows the
+   request to continue.
+10. Logout calls `POST /auth/logout`, which clears the cookie and sends the user
+    back to the login page.
+
+## Project Structure
+
+```text
+Auth-Service/
+|-- backend/
+|   |-- config/
+|   |   `-- passport.js
+|   |-- middlewares/
+|   |   `-- authMiddleware.js
+|   |-- models/
+|   |   `-- User.js
+|   |-- routes/
+|   |   |-- auth.js
+|   |   `-- protected.js
+|   |-- package.json
+|   `-- server.js
+|-- frontend/
+|   |-- src/
+|   |   |-- pages/
+|   |   |   |-- Login.jsx
+|   |   |   `-- Dashboard.jsx
+|   |   |-- App.jsx
+|   |   |-- App.css
+|   |   |-- index.css
+|   |   `-- main.jsx
+|   |-- vercel.json
+|   |-- vite.config.js
+|   `-- package.json
+`-- README.md
 ```
-window.location.href = "http://localhost:5000/auth/google"
-```
 
-### Step 2 — Backend Initiates Google OAuth
+## Backend Files
 
-The `GET /auth/google` route triggers Passport's Google strategy, which redirects the browser to **Google's OAuth consent screen** requesting `profile` and `email` scopes.
+| File | Purpose |
+| --- | --- |
+| `backend/server.js` | Creates the Express app, enables CORS for `CLIENT_URL`, enables JSON parsing, enables cookie parsing, initializes Passport, connects MongoDB, and mounts routes. |
+| `backend/config/passport.js` | Configures the Google OAuth strategy and finds or creates users in MongoDB. |
+| `backend/models/User.js` | Defines the stored Google user fields: `googleId`, `email`, `name`, and `avatar`. |
+| `backend/routes/auth.js` | Provides Google login, Google callback, JWT cookie creation, redirect to dashboard, and logout. |
+| `backend/routes/protected.js` | Provides `GET /api/protected/dashboard`, protected by `authMiddleware`. |
+| `backend/middlewares/authMiddleware.js` | Reads the `token` cookie, verifies the JWT, and rejects missing or invalid tokens. |
 
-### Step 3 — User Grants Permission on Google
+## Frontend Files
 
-The user sees Google's consent screen and approves. Google then redirects back to:
+| File | Purpose |
+| --- | --- |
+| `frontend/src/App.jsx` | Defines the frontend routes: `/` and `/dashboard`. |
+| `frontend/src/pages/Login.jsx` | Shows the Google login button and redirects to the backend OAuth route. |
+| `frontend/src/pages/Dashboard.jsx` | Requests protected backend data using cookies and handles logout. |
+| `frontend/vite.config.js` | Runs the Vite development server on port `3000`. |
+| `frontend/vercel.json` | Rewrites all frontend routes to `index.html` for SPA hosting. |
 
-```
-GET /auth/google/callback?code=AUTHORIZATION_CODE
-```
+## API Reference
 
-### Step 4 — Passport Verify Callback (Find or Create User)
+### Public Routes
 
-Passport exchanges the authorization code for an access token and retrieves the user's profile. The verify callback in `config/passport.js`:
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/` | Backend health check. Returns `API running...`. |
+| `GET` | `/auth/google` | Starts Google OAuth login. |
+| `GET` | `/auth/google/callback` | Google OAuth callback. Creates the JWT cookie and redirects to the frontend dashboard. |
+| `POST` | `/auth/logout` | Clears the `token` cookie. |
 
-1. Searches MongoDB for a user with the matching `googleId`.
-2. If **not found** → creates a new `User` document with `googleId`, `email`, `name`, and `avatar`.
-3. Returns the user object to Passport.
+### Protected Routes
 
-### Step 5 — Backend Signs a JWT and Redirects
+| Method | Endpoint | Auth |
+| --- | --- | --- |
+| `GET` | `/api/protected/dashboard` | Requires the HTTP-only `token` cookie. |
 
-The callback route handler (`session: false` — no server sessions):
-
-1. Takes `req.user` from Passport.
-2. Signs a **JWT** containing `{ id: user._id }` with a **7-day expiry**.
-3. Redirects the browser to the frontend:
-
-```
-http://localhost:3000/success?token=<JWT>
-```
-
-### Step 6 — Frontend Captures the Token (`/success`)
-
-The `Success` page:
-
-1. Reads the `token` query parameter from the URL.
-2. Saves it to **`localStorage`**.
-3. Immediately navigates to `/dashboard` (replacing browser history).
-
-### Step 7 — Dashboard Fetches Protected Data
-
-The `Dashboard` page:
-
-1. Reads the JWT from `localStorage`.
-2. Makes a `GET` request to the backend with the token:
-
-```
-GET http://localhost:5000/api/protected/dashboard
-Authorization: Bearer <token>
-```
-
-### Step 8 — Auth Middleware Validates the JWT
-
-The `authMiddleware`:
-
-1. Extracts the token from the `Authorization: Bearer <token>` header.
-2. Verifies it using `jwt.verify(token, JWT_SECRET)`.
-3. ✅ **Valid** → attaches decoded payload to `req.user`, calls `next()`.
-4. ❌ **Invalid / Missing** → responds with `401 Unauthorized`.
-
-The protected route then returns:
+Example protected response:
 
 ```json
 {
   "message": "Welcome to your dashboard",
-  "user": { "id": "<mongo_user_id>", "iat": 1234567890, "exp": 1235172690 }
+  "user": {
+    "id": "mongo_user_id",
+    "iat": 1234567890,
+    "exp": 1235172690
+  }
 }
 ```
 
----
+## Environment Variables
 
-## 📁 Project Structure
-
-```
-Auth-Service/
-├── backend/
-│   ├── config/
-│   │   └── passport.js          # Google OAuth 2.0 Passport strategy
-│   ├── middlewares/
-│   │   └── authMiddleware.js    # JWT verification middleware
-│   ├── models/
-│   │   └── User.js              # Mongoose User schema
-│   ├── routes/
-│   │   ├── auth.js              # OAuth routes (login + callback)
-│   │   └── protected.js         # JWT-protected API routes
-│   ├── .env                     # Environment variables
-│   ├── package.json
-│   └── server.js                # Express app entry point
-│
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Login.jsx        # Google login button
-│   │   │   ├── Success.jsx      # Token capture + redirect
-│   │   │   └── Dashboard.jsx    # Protected data display
-│   │   ├── App.jsx              # React Router setup
-│   │   ├── main.jsx             # React DOM entry point
-│   │   ├── App.css
-│   │   └── index.css
-│   ├── vite.config.js           # Vite dev server (port 3000)
-│   └── package.json
-│
-├── .gitignore
-└── README.md
-```
-
----
-
-## 📄 File-by-File Breakdown
-
-### Backend
-
-| File                          | Purpose                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------------------- |
-| `server.js`                   | Express app entry point — sets up CORS (allowing `CLIENT_URL`), JSON body parsing, Passport initialization, MongoDB connection, and mounts all routes. |
-| `config/passport.js`          | Configures the `passport-google-oauth20` strategy. On callback, finds or creates the user in MongoDB by `googleId`, storing `email`, `name`, and `avatar`. |
-| `models/User.js`              | Mongoose schema with fields: `googleId` (unique, required), `email` (required), `name` (required), `avatar` (optional). |
-| `routes/auth.js`              | Two routes: `GET /auth/google` (initiates OAuth flow) and `GET /auth/google/callback` (receives Google's response, signs JWT, redirects to frontend). |
-| `routes/protected.js`         | `GET /api/protected/dashboard` — guarded by `authMiddleware`, returns a welcome message and the decoded JWT user data. |
-| `middlewares/authMiddleware.js`| Extracts the JWT from the `Authorization: Bearer` header, verifies it with `jwt.verify()`, and attaches the decoded payload to `req.user`. |
-| `.env`                        | Environment config: `PORT`, `MONGO_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `CLIENT_URL`. |
-
-### Frontend
-
-| File                    | Purpose                                                                                     |
-| ----------------------- | ------------------------------------------------------------------------------------------- |
-| `main.jsx`              | React app entry point — renders `<App />` into the DOM inside `StrictMode`.                  |
-| `App.jsx`               | Sets up React Router with three routes: `/` (Login), `/success` (Success), `/dashboard` (Dashboard). |
-| `pages/Login.jsx`       | Renders the "Login with Google" button. On click, redirects the browser to `GET /auth/google` on the backend. |
-| `pages/Success.jsx`     | Acts as a token bridge — reads the JWT from the URL query string, saves it to `localStorage`, then navigates to `/dashboard`. |
-| `pages/Dashboard.jsx`   | Fetches data from the protected backend endpoint using the stored JWT in an `Authorization: Bearer` header, then displays the response. |
-| `vite.config.js`        | Configures Vite dev server to run on port `3000`.                                            |
-
----
-
-## 📡 API Reference
-
-### Auth Routes (`/auth`)
-
-| Method | Endpoint                 | Description                                    | Auth Required |
-| ------ | ------------------------ | ---------------------------------------------- | ------------- |
-| `GET`  | `/auth/google`           | Initiates Google OAuth 2.0 login flow          | No            |
-| `GET`  | `/auth/google/callback`  | Google OAuth callback — issues JWT & redirects  | No            |
-
-### Protected Routes (`/api/protected`)
-
-| Method | Endpoint                       | Description                      | Auth Required          |
-| ------ | ------------------------------ | -------------------------------- | ---------------------- |
-| `GET`  | `/api/protected/dashboard`     | Returns user data from JWT       | Yes (`Bearer <token>`) |
-
-### Root
-
-| Method | Endpoint | Description         | Auth Required |
-| ------ | -------- | ------------------- | ------------- |
-| `GET`  | `/`      | Health check        | No            |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- **Node.js** (v18 or above)
-- **npm**
-- **MongoDB Atlas** account (or a local MongoDB instance)
-- **Google Cloud Console** project with OAuth 2.0 credentials
-
-### Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone https://github.com/Atanu-Giri/Auth-Service.git
-   cd Auth-Service
-   ```
-
-2. **Install backend dependencies**
-
-   ```bash
-   cd backend
-   npm install
-   ```
-
-3. **Install frontend dependencies**
-
-   ```bash
-   cd ../frontend
-   npm install
-   ```
-
-### Environment Variables
-
-Create a `.env` file inside the `backend/` directory with the following:
+Create `backend/.env`:
 
 ```env
 PORT=5000
@@ -279,50 +197,155 @@ MONGO_URI=your_mongodb_connection_string
 
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=http://localhost:5000/auth/google/callback
 
-JWT_SECRET=your_jwt_secret_key
-
+JWT_SECRET=replace_with_a_long_random_secret
 CLIENT_URL=http://localhost:3000
 ```
 
-> **Note:** Make sure the **Authorized redirect URI** in your Google Cloud Console is set to:
-> `http://localhost:5000/auth/google/callback`
+Create `frontend/.env`:
 
-### Running the App
+```env
+VITE_API_URL=http://localhost:5000
+```
 
-1. **Start the backend** (from the `backend/` directory):
+For production, these URLs must use your deployed domains:
 
-   ```bash
-   npm start
-   ```
+```env
+# backend/.env
+PORT=5000
+MONGO_URI=your_production_mongodb_connection_string
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+GOOGLE_CALLBACK_URL=https://your-api-domain.com/auth/google/callback
+JWT_SECRET=replace_with_a_long_random_secret
+CLIENT_URL=https://your-frontend-domain.com
+```
 
-   The server will start on `http://localhost:5000`.
+```env
+# frontend/.env
+VITE_API_URL=https://your-api-domain.com
+```
 
-2. **Start the frontend** (from the `frontend/` directory):
+In Google Cloud Console, add this authorized redirect URI:
 
-   ```bash
-   npm run dev
-   ```
+```text
+https://your-api-domain.com/auth/google/callback
+```
 
-   The app will be available at `http://localhost:3000`.
+For local development, add:
 
-3. **Open your browser** and navigate to `http://localhost:3000` — click "Login with Google" to begin.
+```text
+http://localhost:5000/auth/google/callback
+```
 
----
+## Local Development
 
-## 💡 Key Design Decisions
+Install backend dependencies:
 
-| Decision                | Rationale                                                                                          |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| **Session-less auth**   | No server-side sessions. Uses `{ session: false }` in Passport and relies entirely on stateless JWTs. |
-| **JWT via URL redirect**| After OAuth, the JWT is passed from backend → frontend via a URL query parameter, then saved to `localStorage`. |
-| **CORS restriction**    | Backend only accepts requests from `CLIENT_URL` (localhost:3000) with credentials enabled.          |
-| **Minimal User model**  | Only stores Google profile data (`googleId`, `email`, `name`, `avatar`) — no local passwords.      |
-| **Custom auth middleware** | A lightweight `authMiddleware` verifies JWTs on every protected request instead of using session cookies. |
-| **7-day token expiry**  | Balances convenience (users don't re-login frequently) with security.                              |
+```bash
+cd backend
+npm install
+```
 
----
+Install frontend dependencies:
 
-## 📜 License
+```bash
+cd ../frontend
+npm install
+```
+
+Start the backend:
+
+```bash
+cd backend
+npm start
+```
+
+The current backend `start` script runs `nodemon server.js`.
+
+Start the frontend:
+
+```bash
+cd frontend
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+## Production Deployment Notes
+
+1. Deploy the backend first and set all `backend/.env` variables in the hosting
+   provider.
+2. Deploy the frontend with `VITE_API_URL` pointing to the deployed backend.
+3. Set `CLIENT_URL` on the backend to the exact deployed frontend origin.
+4. Set `GOOGLE_CALLBACK_URL` to the deployed backend callback URL.
+5. Add that same callback URL in Google Cloud Console.
+6. Use HTTPS in production.
+7. Use a long, random `JWT_SECRET`.
+8. Do not commit `.env` files.
+
+The current cookie code in `backend/routes/auth.js` is local-development friendly:
+
+```js
+res.cookie("token", token, {
+  httpOnly: true,
+  secure: false,
+  sameSite: "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+```
+
+Before production deployment over HTTPS, update the cookie options:
+
+```js
+res.cookie("token", token, {
+  httpOnly: true,
+  secure: true,
+  sameSite: "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+});
+```
+
+If the frontend and backend are on different sites, for example one on
+`vercel.app` and the other on `render.com`, use:
+
+```js
+sameSite: "none",
+secure: true,
+```
+
+Apply the same `secure` and `sameSite` values when clearing the cookie in
+`POST /auth/logout`.
+
+For a production backend process, run the server with your hosting provider's
+Node process command, such as:
+
+```bash
+node server.js
+```
+
+The frontend production build command is:
+
+```bash
+cd frontend
+npm run build
+```
+
+## Common Issues
+
+| Problem | Check |
+| --- | --- |
+| Google login fails | `GOOGLE_CALLBACK_URL` must exactly match an authorized redirect URI in Google Cloud Console. |
+| Dashboard redirects back to login | The cookie was not sent. Check `withCredentials: true`, backend CORS `credentials: true`, `CLIENT_URL`, and cookie `sameSite`/`secure` settings. |
+| CORS error | `CLIENT_URL` must be the exact frontend origin, including protocol and domain. |
+| MongoDB connection fails | Check `MONGO_URI` and network access rules in MongoDB Atlas. |
+| JWT invalid | Make sure the same `JWT_SECRET` is used while signing and verifying tokens. |
+
+## License
 
 ISC
