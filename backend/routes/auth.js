@@ -4,6 +4,32 @@ import jwt from "jsonwebtoken";
 
 const router = express.Router();
 
+const shouldUseSecureCookie = (req) => {
+  const forwardedProto = req.get("x-forwarded-proto") || "";
+
+  return (
+    req.secure ||
+    forwardedProto.split(",")[0].trim() === "https" ||
+    process.env.NODE_ENV === "production"
+  );
+};
+
+const getAuthCookieOptions = (req) => {
+  const secure = shouldUseSecureCookie(req);
+
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: secure ? "none" : "lax",
+    path: "/",
+  };
+};
+
+const getClientUrl = (path = "") => {
+  const clientUrl = (process.env.CLIENT_URL || "http://localhost:3000").replace(/\/$/, "");
+  return `${clientUrl}${path}`;
+};
+
 // Google OAuth 2.0 authentication route
 router.get(
   "/google",
@@ -21,14 +47,11 @@ router.get(
         expiresIn: "7d",
       });
 
-    // 👇 Redirect to frontend with token
-    res.cookie("token", token, {
-  httpOnly: true,
-  secure: true,
-  sameSite: "none",
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-});
-    res.redirect(`${process.env.CLIENT_URL}/dashboard`);
+      res.cookie("token", token, {
+        ...getAuthCookieOptions(req),
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+      res.redirect(getClientUrl("/dashboard"));
 
     } catch (err) {
       res.status(500).json({ error: "Authentication failed" });
@@ -36,12 +59,8 @@ router.get(
   });
 
 router.post("/logout", (req, res) => {
-  res.clearCookie("token", {
-  httpOnly: true,
-  secure: true,
-  sameSite: "none",
-});
+  res.clearCookie("token", getAuthCookieOptions(req));
   res.json({ message: "Logged out" });
 });
 
-  export default router;
+export default router;
