@@ -16,13 +16,18 @@ const shouldUseSecureCookie = (req) => {
 
 const getAuthCookieOptions = (req) => {
   const secure = shouldUseSecureCookie(req);
-
-  return {
+  const options = {
     httpOnly: true,
     secure,
     sameSite: secure ? "none" : "lax",
     path: "/",
   };
+
+  if (process.env.COOKIE_DOMAIN) {
+    options.domain = process.env.COOKIE_DOMAIN;
+  }
+
+  return options;
 };
 
 const getClientUrl = (path = "") => {
